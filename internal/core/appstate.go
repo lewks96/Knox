@@ -106,23 +106,22 @@ func (a *AppState) AuthenticateClient(clientId string, clientSecret string) bool
     dbClientSecret := client.ClientSecret
 	sum := generateSha256Hash(s)
 	return dbClientSecret == sum
-
-	//stmt, err := a.DB.Query("select client_secret from sso_clients where client_id = ?", clientId)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//defer stmt.Close()
-
-	//for stmt.Next() {
-	//	s := fmt.Sprintf("%s|%s|%s", clientId, clientId, clientSecret)
-	//	var dbClientSecret string
-	//	stmt.Scan(&dbClientSecret)
-	//    sum := generateSha256Hash(s)
-	//	return dbClientSecret == sum
-	//}
 	return false
 }
 
+func (a *AppState) GenerateAccessToken(clientId string, clientSecret string) string {
+	randomSt := generateRandomAlphaNumericString(16)
+	userRand := generateRandomAlphaNumericString(16)
+	token := fmt.Sprintf("%s:%s", randomSt, generateSha256Hash(clientId+userRand))
+
+	stmt, err := a.DB.Query("insert into sso_tokens (token, client_id, created_at, updated_at) values (?, ?, datetime('now'), datetime('now'))", token, clientId)
+	if err != nil {
+		panic(err)
+	}
+	defer stmt.Close()
+    
+	return token
+}
 func (a *AppState) GenerateSsoToken(clientId string) string {
 	randomSt := generateRandomAlphaNumericString(16)
 	userRand := generateRandomAlphaNumericString(16)
@@ -133,6 +132,6 @@ func (a *AppState) GenerateSsoToken(clientId string) string {
 		panic(err)
 	}
 	defer stmt.Close()
-
+    
 	return token
 }
