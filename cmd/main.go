@@ -1,43 +1,32 @@
 package main
 
 import (
+	"net/http"
+	"os"
+	"os/signal"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/lewks96/knox-am/internal/core"
-	"github.com/lewks96/knox-am/internal/oauth"
 	"github.com/lewks96/knox-am/internal/util"
 	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
-	"net/http"
 )
-
-func GetClientCredentials(r *http.Request) (string, string) {
-	err := r.ParseForm()
-
-	if err != nil {
-		panic(err)
-	}
-
-	clientId := r.Form.Get("client_id")
-	clientSecret := r.Form.Get("client_secret")
-	return clientId, clientSecret
-}
 
 func main() {
 	app := &core.AppState{}
 	app.Initialize()
 	defer app.Close()
+    
+    c := make(chan os.Signal, 1)
+    signal.Notify(c, os.Interrupt)
+    go func() {
+        <-c
+        app.Close()
+        os.Exit(1)
+    }()
+
     util.InitializeDB(app.DB)
-
-    oauthProvider := &oauth.OAuthProvider{}
-    err := oauthProvider.Initialize()
-    if err != nil {
-        panic(err)
-    }
-    defer oauthProvider.Close()
-
-    app.GetClientsFromDB() 
-
+    
 	logger, er := zap.NewProduction()
 	if er != nil {
 		panic(er)
@@ -53,23 +42,38 @@ func main() {
 	})
 
 	e.POST("/oauth/token", func(c echo.Context) error {
-		clientId, clientSecret := GetClientCredentials(c.Request())
+        clientId := c.FormValue("client_id")
+        clientSecret := c.FormValue("client_secret")
+        grantType := c.FormValue("grant_type")
+        scope := c.FormValue("scope")
+        //redirectUri := c.FormValue("redirect_uri")
 
-		if clientId == "" {
-			return c.String(http.StatusBadRequest, "client_id is required")
+		if clientId  == "" {
+            errorResponse := map[string]string{"error": "client_id is required"}
+			return c.JSON(http.StatusBadRequest, errorResponse)
 		}
+        if clientSecret == "" {
+            errorResponse := map[string]string{"error": "client_secret is required"}
+            return c.JSON(http.StatusBadRequest, errorResponse)
+        }
+        if grantType == "" {
+            errorResponse := map[string]string{"error": "grant_type is required"}
+            return c.JSON(http.StatusBadRequest, errorResponse)
+        }
 
-		if !app.ClientExists(clientId) {
-			return c.String(http.StatusUnauthorized, "client_id is invalid")
-		}
-
-		if !app.AuthenticateClient(clientId, clientSecret) {
-			return c.String(http.StatusUnauthorized, "client credentials are invalid")
-		}
-
-		token := app.GenerateSsoToken(clientId)
-		return c.String(http.StatusOK, token)
-	})
+        switch grantType {
+        case "client_credentials":
+            token, err := app.OAuthProvider.AuthorizeForGrantClientCredentials(clientId, clientSecret, scope)
+            if err != nil {
+                respJson := map[string]string{"error": err.Error()}
+                return c.JSON(http.StatusUnauthorized, respJson)
+            }
+            return c.JSON(http.StatusOK, token)
+        default:
+            respJson := map[string]string{"error": "unsupported_grant_type"}
+            return c.JSON(http.StatusBadRequest, respJson)
+        }
+    })
 
 	e.Logger.Fatal(e.Start(":9000"))
 }

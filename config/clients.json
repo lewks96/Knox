@@ -1,15 +1,15 @@
 [
     {
      "clientId": "testclient",
-     "clientSecret": "g+mDjNd@{9Z\"8La:j3u})4?8//",
+     "clientSecret": "gmDjNd@{9Z\"8La:j3u})4?8//",
      "allowedGrants": [
         "clientCredentials"
      ],
      "issueRefreshToken": true,
      "tokenType":"opaque",
-     "accessTokenExpiryTimeSeconds": 500,
-     "refreshTokenExpiryTimeSeconds": 5000,
+     "accessTokenExpiryTimeSeconds": 3600,
+     "refreshTokenExpiryTimeSeconds": 86400,
      "redirectUris": [],
-     "scopes": []
+     "scopes": ["", "testscope"]
     }
 ]
