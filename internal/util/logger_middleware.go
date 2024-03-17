@@ -1,13 +1,13 @@
 package util
 
 import (
-    "go.uber.org/zap"
-    "github.com/labstack/echo/v4"
-    "time"
+	"github.com/labstack/echo/v4"
+	"go.uber.org/zap"
+	"time"
 )
 
 func ZapRequestLogger(logger *zap.Logger) echo.MiddlewareFunc {
-    return func(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			start := time.Now()
 
@@ -37,13 +37,13 @@ func ZapRequestLogger(logger *zap.Logger) echo.MiddlewareFunc {
 			n := res.Status
 			switch {
 			case n >= 500:
-                logger.Error("Server error", fields...)
+				logger.Error("Server error", fields...)
 			case n >= 400:
-                logger.Warn("Client error", fields...)
+				logger.Warn("Client error", fields...)
 			case n >= 300:
-                logger.Info("Redirection", fields...)
+				logger.Info("Redirection", fields...)
 			default:
-                logger.Info("Success", fields...)
+				logger.Info("Success", fields...)
 			}
 
 			return nil

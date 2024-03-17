@@ -1,11 +1,11 @@
 package oauth
 
 import (
-	"os"
-	"strconv"
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"strconv"
 	//"github.com/google/uuid"
 	"github.com/lewks96/knox-am/internal/oauth/internal"
 	"github.com/lewks96/knox-am/internal/util"
@@ -63,23 +63,21 @@ func (p *OAuthProvider) pullClientsFromRedis() error {
 }
 
 func (p *OAuthProvider) Initialize() error {
-    redisHost := os.Getenv("REDIS_HOST")
-    redisPort := os.Getenv("REDIS_PORT")
-    redisPassword := os.Getenv("REDIS_PASSWORD")
-    redisDB := os.Getenv("REDIS_DB")
-    redisDBInt, err := strconv.Atoi(redisDB)
-    if err != nil {
-        redisDBInt = 0
-    }
-
-
+	redisHost := os.Getenv("REDIS_HOST")
+	redisPort := os.Getenv("REDIS_PORT")
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisDB := os.Getenv("REDIS_DB")
+	redisDBInt, err := strconv.Atoi(redisDB)
+	if err != nil {
+		redisDBInt = 0
+	}
 
 	p.Logger, _ = zap.NewProduction()
 	p.Context = context.Background()
 	p.RedisClient = redis.NewClient(&redis.Options{
 		Addr:     redisHost + ":" + redisPort,
 		Password: redisPassword,
-        DB:       redisDBInt,
+		DB:       redisDBInt,
 	})
 
 	err = p.RedisClient.Ping(p.Context).Err()
@@ -88,17 +86,14 @@ func (p *OAuthProvider) Initialize() error {
 		return err
 	}
 
-    p.RedisSubmitChannel = make(chan redisAccessSession)
-
-    go func() {
-        for {
-            accessSession := <-p.RedisSubmitChannel
-            serialazedSession, _ := json.Marshal(accessSession)
-            p.RedisClient.Set(p.Context, "session-"+accessSession.AccessToken, serialazedSession, 0)
-        }
-    }()
-
-
+	p.RedisSubmitChannel = make(chan redisAccessSession)
+	go func() {
+		for {
+			accessSession := <-p.RedisSubmitChannel
+			serialazedSession, _ := json.Marshal(accessSession)
+			p.RedisClient.Set(p.Context, "session-"+accessSession.AccessToken, serialazedSession, 0)
+		}
+	}()
 
 	// this is probably really bad but all good for now
 	isRunning := p.RedisClient.Get(p.Context, "global-running")
@@ -201,7 +196,7 @@ func (p *OAuthProvider) GenerateOpaqueToken() string {
 func (p *OAuthProvider) generateSession(client oauth.OAuthClientConfiguration, scopes string) redisAccessSession {
 	// generate timestap
 	ts := time.Now().Unix()
-    
+
 	accessToken := p.GenerateOpaqueToken()
 	refreshToken := p.GenerateOpaqueToken()
 	accessSession := redisAccessSession{
@@ -276,9 +271,9 @@ func (p *OAuthProvider) AuthorizeForGrantClientCredentials(clientId string, clie
 	}
 
 	accessSession := p.generateSession(client, scopes)
-    go func() {
-        p.RedisSubmitChannel <- accessSession
-    }()
+	go func() {
+		p.RedisSubmitChannel <- accessSession
+	}()
 
 	return &AccessToken{
 		AccessToken:  accessSession.AccessToken,

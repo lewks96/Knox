@@ -1,10 +1,9 @@
 package util
 
 import (
-    "database/sql"
-    _ "github.com/mattn/go-sqlite3"
+	"database/sql"
+	_ "github.com/mattn/go-sqlite3"
 )
-
 
 func InitializeDB(db *sql.DB) {
 	combinedQuery := "create table if not exists sso_tokens (id integer primary key, token text, client_id text, created_at datetime, updated_at datetime);"
@@ -14,7 +13,7 @@ func InitializeDB(db *sql.DB) {
 	if err != nil {
 		panic("")
 	}
-    initializeTestData(db)
+	initializeTestData(db)
 }
 
 func initializeTestData(db *sql.DB) {
@@ -30,4 +29,3 @@ func initializeTestData(db *sql.DB) {
 		panic(err)
 	}
 }
-

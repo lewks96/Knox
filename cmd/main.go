@@ -1,39 +1,39 @@
 package main
 
 import (
-    "github.com/joho/godotenv"
-    "io"
-    "strings"
-    "net/url"
-	"net/http"
-	"os"
-	"os/signal"
+	"encoding/json"
+	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/lewks96/knox-am/internal/core"
 	"github.com/lewks96/knox-am/internal/util"
-    "encoding/json"
 	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"strings"
 )
 
 func main() {
-    err := godotenv.Load()
-    if err != nil {
-        panic(err)
-    }
+	err := godotenv.Load()
+	if err != nil {
+		panic(err)
+	}
 
 	app := &core.AppState{}
 	app.Initialize()
 	defer app.Close()
-    
-    c := make(chan os.Signal, 1)
-    signal.Notify(c, os.Interrupt)
-    go func() {
-        <-c
-        app.Close()
-        os.Exit(1)
-    }()
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		<-c
+		app.Close()
+		os.Exit(1)
+	}()
 
 	logger, er := zap.NewProduction()
 	if er != nil {
@@ -43,82 +43,82 @@ func main() {
 
 	e := echo.New()
 	e.Use(middleware.Recover())
-    e.Use(util.ZapRequestLogger(logger))
+	e.Use(util.ZapRequestLogger(logger))
 
 	e.POST("/oauth/token", func(c echo.Context) error {
-        // read body to string
-        body, err := io.ReadAll(c.Request().Body)
-        if err != nil {
-            return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_request"})
-        }
+		// read body to string
+		body, err := io.ReadAll(c.Request().Body)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+		}
 
-        slice := strings.Split(string(body), "&")
-        data := make(map[string]string)
-        for _, s := range slice {
-            pair := strings.Split(s, "=")
-            data[pair[0]], _ = url.QueryUnescape(pair[1])
-        }
+		slice := strings.Split(string(body), "&")
+		data := make(map[string]string)
+		for _, s := range slice {
+			pair := strings.Split(s, "=")
+			data[pair[0]], _ = url.QueryUnescape(pair[1])
+		}
 
-        clientId := data["client_id"]
-        clientSecret := data["client_secret"]
-        grantType := data["grant_type"]
-        scope := data["scope"]
-        //redirectUri := data["redirect_uri"]
+		clientId := data["client_id"]
+		clientSecret := data["client_secret"]
+		grantType := data["grant_type"]
+		scope := data["scope"]
+		//redirectUri := data["redirect_uri"]
 
-		if clientId  == "" {
-            errorResponse := map[string]string{"error": "client_id is required"}
+		if clientId == "" {
+			errorResponse := map[string]string{"error": "client_id is required"}
 			return c.JSON(http.StatusBadRequest, errorResponse)
 		}
-        if clientSecret == "" {
-            errorResponse := map[string]string{"error": "client_secret is required"}
-            return c.JSON(http.StatusBadRequest, errorResponse)
-        }
-        if grantType == "" {
-            errorResponse := map[string]string{"error": "grant_type is required"}
-            return c.JSON(http.StatusBadRequest, errorResponse)
-        }
+		if clientSecret == "" {
+			errorResponse := map[string]string{"error": "client_secret is required"}
+			return c.JSON(http.StatusBadRequest, errorResponse)
+		}
+		if grantType == "" {
+			errorResponse := map[string]string{"error": "grant_type is required"}
+			return c.JSON(http.StatusBadRequest, errorResponse)
+		}
 
-        switch grantType {
-        case "client_credentials":
-            token, err := app.OAuthProvider.AuthorizeForGrantClientCredentials(clientId, clientSecret, scope)
-            if err != nil {
-                respJson := map[string]string{"error": err.Error()}
-                return c.JSON(http.StatusUnauthorized, respJson)
-            }
-            c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-            c.Response().WriteHeader(http.StatusOK)
-            json.NewEncoder(c.Response()).Encode(token)
-            return nil
-        default:
-            respJson := map[string]string{"error": "unsupported_grant_type"}
-            return c.JSON(http.StatusBadRequest, respJson)
-        }
-    })
+		switch grantType {
+		case "client_credentials":
+			token, err := app.OAuthProvider.AuthorizeForGrantClientCredentials(clientId, clientSecret, scope)
+			if err != nil {
+				respJson := map[string]string{"error": err.Error()}
+				return c.JSON(http.StatusUnauthorized, respJson)
+			}
+			c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c.Response().WriteHeader(http.StatusOK)
+			json.NewEncoder(c.Response()).Encode(token)
+			return nil
+		default:
+			respJson := map[string]string{"error": "unsupported_grant_type"}
+			return c.JSON(http.StatusBadRequest, respJson)
+		}
+	})
 
-    e.GET("/oauth/tokeninfo", func(c echo.Context) error {
+	e.GET("/oauth/tokeninfo", func(c echo.Context) error {
 
-        accessToken := c.QueryParam("access_token")
-        if accessToken == "" {
-            errorResponse := map[string]string{"error": "access_token is required"}
-            return c.JSON(http.StatusBadRequest, errorResponse)
-        }
-     
-        tokenInfo, err := app.OAuthProvider.GetTokenInfo(accessToken)
-        if err != nil {
-            respJson := map[string]string{"error": err.Error()}
-            return c.JSON(http.StatusUnauthorized, respJson)
-        }
-        return c.JSON(http.StatusOK, tokenInfo)
-    })
-    hostname := os.Getenv("HOSTNAME")
-    port := os.Getenv("PORT")
-    if hostname == "" {
-        logger.Info("HOSTNAME environment variable not set, defaulting to localhost")
-        hostname = "localhost"
-    }
-    if port == "" {
-        logger.Info("PORT environment variable not set, defaulting to 9000")
-        port = "9000"
-    }
-    e.Logger.Fatal(e.Start(hostname + ":" + port))
+		accessToken := c.QueryParam("access_token")
+		if accessToken == "" {
+			errorResponse := map[string]string{"error": "access_token is required"}
+			return c.JSON(http.StatusBadRequest, errorResponse)
+		}
+
+		tokenInfo, err := app.OAuthProvider.GetTokenInfo(accessToken)
+		if err != nil {
+			respJson := map[string]string{"error": err.Error()}
+			return c.JSON(http.StatusUnauthorized, respJson)
+		}
+		return c.JSON(http.StatusOK, tokenInfo)
+	})
+	hostname := os.Getenv("HOSTNAME")
+	port := os.Getenv("PORT")
+	if hostname == "" {
+		logger.Info("HOSTNAME environment variable not set, defaulting to localhost")
+		hostname = "localhost"
+	}
+	if port == "" {
+		logger.Info("PORT environment variable not set, defaulting to 9000")
+		port = "9000"
+	}
+	e.Logger.Fatal(e.Start(hostname + ":" + port))
 }

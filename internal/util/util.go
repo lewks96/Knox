@@ -1,8 +1,8 @@
 package util
 
 import (
-    "crypto/sha256"
-    "encoding/hex"
+	"crypto/sha256"
+	"encoding/hex"
 	"math/rand"
 )
 
@@ -14,7 +14,6 @@ func GenerateRandomAlphaNumericString(length int) string {
 	}
 	return string(b)
 }
-
 
 func GenerateSha256HashString(input string) string {
 	hash := sha256.New()

@@ -43,10 +43,10 @@ func LoadClientsFromConfigFile() ([]OAuthClientConfiguration, error) {
 	}
 
 	for i := range clients {
-        randomSecret := util.GenerateRandomAlphaNumericString(64)
-        hashedSecret := util.GenerateSha256HashString(clients[i].ClientSecret + randomSecret)
-        clients[i].ClientSecret = hashedSecret
-        clients[i].ClientSecretSalt = randomSecret
+		randomSecret := util.GenerateRandomAlphaNumericString(64)
+		hashedSecret := util.GenerateSha256HashString(clients[i].ClientSecret + randomSecret)
+		clients[i].ClientSecret = hashedSecret
+		clients[i].ClientSecretSalt = randomSecret
 	}
 
 	return clients, nil
