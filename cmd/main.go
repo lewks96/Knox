@@ -1,6 +1,7 @@
 package main
 
 import (
+    "github.com/joho/godotenv"
     "io"
     "strings"
     "net/url"
@@ -17,6 +18,11 @@ import (
 )
 
 func main() {
+    err := godotenv.Load()
+    if err != nil {
+        panic(err)
+    }
+
 	app := &core.AppState{}
 	app.Initialize()
 	defer app.Close()
@@ -29,8 +35,6 @@ func main() {
         os.Exit(1)
     }()
 
-    util.InitializeDB(app.DB)
-    
 	logger, er := zap.NewProduction()
 	if er != nil {
 		panic(er)
@@ -40,7 +44,6 @@ func main() {
 	e := echo.New()
 	e.Use(middleware.Recover())
     e.Use(util.ZapRequestLogger(logger))
-    //e.Use(middleware.Logger())
 
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!")
@@ -64,12 +67,7 @@ func main() {
         clientSecret := data["client_secret"]
         grantType := data["grant_type"]
         scope := data["scope"]
-
-        //clientId := c.FormValue("client_id")
-        //clientSecret := c.FormValue("client_secret")
-        //grantType := c.FormValue("grant_type")
-        //scope := c.FormValue("scope")
-        //redirectUri := c.FormValue("redirect_uri")
+        //redirectUri := data["redirect_uri"]
 
 		if clientId  == "" {
             errorResponse := map[string]string{"error": "client_id is required"}
@@ -116,6 +114,15 @@ func main() {
         }
         return c.JSON(http.StatusOK, tokenInfo)
     })
-
-	e.Logger.Fatal(e.Start(":9000"))
+    hostname := os.Getenv("HOSTNAME")
+    port := os.Getenv("PORT")
+    if hostname == "" {
+        logger.Info("HOSTNAME environment variable not set, defaulting to localhost")
+        hostname = "localhost"
+    }
+    if port == "" {
+        logger.Info("PORT environment variable not set, defaulting to 9000")
+        port = "9000"
+    }
+    e.Logger.Fatal(e.Start(hostname + ":" + port))
 }

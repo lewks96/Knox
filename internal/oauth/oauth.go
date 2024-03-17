@@ -1,6 +1,8 @@
 package oauth
 
 import (
+	"os"
+	"strconv"
 	"context"
 	"encoding/json"
 	"errors"
@@ -61,14 +63,26 @@ func (p *OAuthProvider) pullClientsFromRedis() error {
 }
 
 func (p *OAuthProvider) Initialize() error {
+    redisHost := os.Getenv("REDIS_HOST")
+    redisPort := os.Getenv("REDIS_PORT")
+    redisPassword := os.Getenv("REDIS_PASSWORD")
+    redisDB := os.Getenv("REDIS_DB")
+    redisDBInt, err := strconv.Atoi(redisDB)
+    if err != nil {
+        redisDBInt = 0
+    }
+
+
+
 	p.Logger, _ = zap.NewProduction()
 	p.Context = context.Background()
 	p.RedisClient = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
+		Addr:     redisHost + ":" + redisPort,
+		Password: redisPassword,
+        DB:       redisDBInt,
 	})
-	err := p.RedisClient.Ping(p.Context).Err()
+
+	err = p.RedisClient.Ping(p.Context).Err()
 	if err != nil {
 		p.Logger.Error("Failed to connect to Redis", zap.Error(err))
 		return err
