@@ -45,10 +45,6 @@ func main() {
 	e.Use(middleware.Recover())
     e.Use(util.ZapRequestLogger(logger))
 
-	e.GET("/", func(c echo.Context) error {
-		return c.String(http.StatusOK, "Hello, World!")
-	})
-
 	e.POST("/oauth/token", func(c echo.Context) error {
         // read body to string
         body, err := io.ReadAll(c.Request().Body)
