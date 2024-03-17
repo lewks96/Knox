@@ -3,7 +3,6 @@ module github.com/lewks96/knox-am
 go 1.22.1
 
 require (
-	github.com/google/uuid v1.6.0
 	github.com/labstack/echo/v4 v4.11.4
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/redis/go-redis/v9 v9.5.1

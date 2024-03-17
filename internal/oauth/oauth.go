@@ -74,6 +74,18 @@ func (p *OAuthProvider) Initialize() error {
 		return err
 	}
 
+    p.RedisSubmitChannel = make(chan redisAccessSession)
+
+    go func() {
+        for {
+            accessSession := <-p.RedisSubmitChannel
+            serialazedSession, _ := json.Marshal(accessSession)
+            p.RedisClient.Set(p.Context, "session-"+accessSession.AccessToken, serialazedSession, 0)
+        }
+    }()
+
+
+
 	// this is probably really bad but all good for now
 	isRunning := p.RedisClient.Get(p.Context, "global-running")
 	if isRunning.Val() == "true" {
@@ -250,8 +262,9 @@ func (p *OAuthProvider) AuthorizeForGrantClientCredentials(clientId string, clie
 	}
 
 	accessSession := p.generateSession(client, scopes)
-	//_, _ := json.Marshal(accessSession)
-	//p.RedisClient.Set(p.Context, "session-"+accessSession.AccessToken, serialazedSession, 0)
+    go func() {
+        p.RedisSubmitChannel <- accessSession
+    }()
 
 	return &AccessToken{
 		AccessToken:  accessSession.AccessToken,

@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/lewks96/knox-am/internal/core"
 	"github.com/lewks96/knox-am/internal/util"
+    "encoding/json"
 	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
 )
@@ -38,7 +39,8 @@ func main() {
 
 	e := echo.New()
 	e.Use(middleware.Recover())
-    e.Use(middleware.Logger())
+    e.Use(util.ZapRequestLogger(logger))
+    //e.Use(middleware.Logger())
 
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!")
@@ -89,7 +91,10 @@ func main() {
                 respJson := map[string]string{"error": err.Error()}
                 return c.JSON(http.StatusUnauthorized, respJson)
             }
-            return c.JSON(http.StatusOK, token)
+            c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+            c.Response().WriteHeader(http.StatusOK)
+            json.NewEncoder(c.Response()).Encode(token)
+            return nil
         default:
             respJson := map[string]string{"error": "unsupported_grant_type"}
             return c.JSON(http.StatusBadRequest, respJson)
