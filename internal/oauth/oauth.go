@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"crypto/tls"
 	"context"
 	"encoding/json"
 	"errors"
@@ -67,18 +68,29 @@ func (p *OAuthProvider) Initialize() error {
 	redisPort := os.Getenv("REDIS_PORT")
 	redisPassword := os.Getenv("REDIS_PASSWORD")
 	redisDB := os.Getenv("REDIS_DB")
+    redisUseTLS := os.Getenv("REDIS_USE_TLS")
+
 	redisDBInt, err := strconv.Atoi(redisDB)
 	if err != nil {
 		redisDBInt = 0
 	}
 
-	p.Logger, _ = zap.NewProduction()
-	p.Context = context.Background()
-	p.RedisClient = redis.NewClient(&redis.Options{
+    tslConfig := tls.Config{
+        MinVersion: tls.VersionTLS12,
+    }
+
+    opt := redis.Options{
 		Addr:     redisHost + ":" + redisPort,
 		Password: redisPassword,
 		DB:       redisDBInt,
-	})
+	};
+    if redisUseTLS == "true" {
+        opt.TLSConfig = &tslConfig
+    }
+
+	p.Logger, _ = zap.NewProduction()
+	p.Context = context.Background()
+	p.RedisClient = redis.NewClient(&opt)
 
 	err = p.RedisClient.Ping(p.Context).Err()
 	if err != nil {
