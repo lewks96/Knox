@@ -166,6 +166,11 @@ func (r *RedisDSSProvider) SaveSession(session oauth.StoredSession) error {
 }
 
 func (r *RedisDSSProvider) DeleteSession(accessToken string) error {
+    exists := r.RedisClient.Get(r.Context, accessToken)
+    if exists.Err() != nil {
+        return errors.New("session does not exist in store")
+    }
+
     err := r.RedisClient.Del(r.Context, accessToken)
     if err.Err() != nil {
         r.Logger.Error("Failed to delete session", zap.Error(err.Err()))

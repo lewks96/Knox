@@ -114,6 +114,22 @@ func main() {
 		return c.JSON(http.StatusOK, tokenInfo)
 	})
 
+	e.DELETE("/oauth/revoke", func(c echo.Context) error {
+		accessToken := c.QueryParam("access_token")
+		if accessToken == "" {
+			errorResponse := map[string]string{"error": "access_token is required"}
+			return c.JSON(http.StatusBadRequest, errorResponse)
+		}
+
+		err := app.OAuthProvider.DeleteSession(accessToken)
+		if err != nil {
+			respJson := map[string]string{"error": "invalid access token"}
+			return c.JSON(http.StatusUnauthorized, respJson)
+		}
+		respJson := map[string]string{"error": "session deleted"}
+		return c.JSON(http.StatusOK, respJson)
+	})
+
 	hostname := os.Getenv("HOSTNAME")
 	port := os.Getenv("PORT")
 	if hostname == "" {

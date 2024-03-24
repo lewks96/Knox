@@ -180,9 +180,6 @@ func (p *OAuthProvider) generateSession(client oauth.OAuthClientConfiguration, s
 		Scopes:       scopes,
 		IssuedAt:     ts,
 	}
-
-	//serialazedSession, _ := json.Marshal(accessSession)
-	//p.RedisClient.Set(p.Context, "session-"+accessToken, serialazedSession, 0)
 	return accessSession
 }
 
@@ -196,27 +193,19 @@ type TokenInfo struct {
 	ClientId     string `json:"client_id"`
 }
 
+func (p *OAuthProvider) DeleteSession(accessToken string) error {
+     err := p.DSSProvider.DeleteSession(accessToken)
+     return err
+}
+
 func (p *OAuthProvider) GetTokenInfo(accessToken string) (TokenInfo, error) {
-	//session := p.RedisClient.Get(p.Context, "session-"+accessToken)
     session, err := p.DSSProvider.GetSession(fmt.Sprintf("session-%s", accessToken))
     if err != nil {
         p.Logger.Error("Failed to get session from DSS provider", zap.Error(err))
         return TokenInfo{}, err
     }
-
-	//if session.Val() == "" {
-	//	p.Logger.Debug("Session does not exist", zap.String("accessToken", accessToken))
-	//	return TokenInfo{}, errors.New("invalid access token")
-	//}
-
-//	var accessSession oauth.StoredSession
-//	err := json.Unmarshal([]byte(session.Val()), &accessSession)
-//	if err != nil {
-//		p.Logger.Error("Failed to unmarshal access session", zap.Error(err))
-//		return TokenInfo{}, err
-//	}
-
-	client, ok := p.Clients[session.ClientId]
+	
+    client, ok := p.Clients[session.ClientId]
 	if !ok {
 		p.Logger.Debug("Client does not exist", zap.String("clientId", session.ClientId))
 		return TokenInfo{}, errors.New("client does not exist")
