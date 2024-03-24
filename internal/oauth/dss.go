@@ -12,5 +12,5 @@ type SessionProvider interface {
 	DeleteSession(accessToken string) error
 	Flush() (int, error)
 	Ping() error
-	CleanOldTokens()
+	CleanOldTokens(clients map[string]oauth.OAuthClientConfiguration)
 }

@@ -15,14 +15,13 @@ import (
 )
 
 type RedisDSSProvider struct {
-	RedisClient        *redis.Client
-	Context            context.Context
-	Logger             *zap.Logger
-	SubmitChannel      chan oauth.StoredSession
-	NodeId             int
-	Done               chan bool
-	PingTicker         *time.Ticker
-	ExpiredTokenTicker *time.Ticker
+	RedisClient   *redis.Client
+	Context       context.Context
+	Logger        *zap.Logger
+	SubmitChannel chan oauth.StoredSession
+	NodeId        int
+	Done          chan bool
+	PingTicker    *time.Ticker
 }
 
 func NewRedisDSSProvider(nodeId int) (*RedisDSSProvider, error) {
@@ -62,14 +61,13 @@ func NewRedisDSSProvider(nodeId int) (*RedisDSSProvider, error) {
 
 	Logger.Info("Connected to Redis")
 	provider := &RedisDSSProvider{
-		RedisClient:        RedisClient,
-		Context:            Context,
-		Logger:             Logger,
-		SubmitChannel:      make(chan oauth.StoredSession, 1000),
-		NodeId:             nodeId,
-		Done:               make(chan bool),
-		PingTicker:         time.NewTicker(10 * time.Second),
-		ExpiredTokenTicker: time.NewTicker(30 * time.Second),
+		RedisClient:   RedisClient,
+		Context:       Context,
+		Logger:        Logger,
+		SubmitChannel: make(chan oauth.StoredSession, 1000),
+		NodeId:        nodeId,
+		Done:          make(chan bool),
+		PingTicker:    time.NewTicker(10 * time.Second),
 	}
 	return provider, nil
 }
@@ -114,18 +112,6 @@ func (r *RedisDSSProvider) AttachToStore() error {
 					r.Logger.Error("Failed to ping Redis server", zap.Error(err))
 				}
 				r.Logger.Debug("Pinged Redis server")
-			}
-		}
-	}()
-
-	go func() {
-		for {
-			select {
-			case <-r.Done:
-				r.Logger.Info("Stopping expired token ticker")
-				return
-			case <-r.ExpiredTokenTicker.C:
-				r.CleanOldTokens()
 			}
 		}
 	}()
@@ -202,7 +188,6 @@ func (r *RedisDSSProvider) Flush() (int, error) {
 		return 0, err
 	}
 
-	// delete all keys in the database starting with "session-"
 	for _, key := range keys {
 		err := r.RedisClient.Del(r.Context, key)
 		if err.Err() != nil {
@@ -222,12 +207,38 @@ func (r *RedisDSSProvider) Ping() error {
 	return nil
 }
 
-func (r *RedisDSSProvider) CleanOldTokens() {
-	// rely on redis expiry to clean up old tokens
+func (r *RedisDSSProvider) CleanOldTokens(clients map[string]oauth.OAuthClientConfiguration) {
 	keys, err := r.RedisClient.Keys(r.Context, "session-*").Result()
 	if err != nil {
 		r.Logger.Error("Failed to get keys from Redis", zap.Error(err))
 		return
+	}
+
+	for _, key := range keys {
+		res := r.RedisClient.Get(r.Context, key)
+		if res.Val() == "" {
+			r.Logger.Error("Failed to get session", zap.String("key", key))
+			continue
+		}
+
+		var storedSession oauth.StoredSession
+		err := json.Unmarshal([]byte(res.Val()), &storedSession)
+		if err != nil {
+			r.Logger.Error("Failed to unmarshal session", zap.Error(err))
+			continue
+		}
+
+		client, ok := clients[storedSession.ClientId]
+		if !ok {
+			r.Logger.Error("Client not found in configuration", zap.String("clientId", storedSession.ClientId))
+			continue
+		}
+
+		expiryTime := time.Unix(storedSession.IssuedAt+int64(client.AccessTokenExpiryTimeSeconds), 0)
+		if expiryTime.Before(time.Now()) {
+			r.Logger.Debug("Cleaning old token", zap.String("key", key))
+			r.RedisClient.Del(r.Context, key)
+		}
 	}
 	r.Logger.Debug("Cleaning old expired tokens", zap.Int("count", len(keys)))
 }

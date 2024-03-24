@@ -2,10 +2,12 @@ package oauth
 
 import (
 	"errors"
+	"fmt"
 	"github.com/lewks96/knox-am/internal/oauth/internal"
 	"github.com/lewks96/knox-am/internal/util"
 	"go.uber.org/zap"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,10 +17,12 @@ import (
  * @description Contains configuration and methods to provide OAuth services
  */
 type OAuthProvider struct {
-	Clients       map[string]oauth.OAuthClientConfiguration
-	Logger        *zap.Logger
-	IsPrimaryNode bool
-	DSSProvider   SessionProvider
+	Clients               map[string]oauth.OAuthClientConfiguration
+	Logger                *zap.Logger
+	IsPrimaryNode         bool
+	DSSProvider           SessionProvider
+	ExpiredTokenTicker    *time.Ticker
+	OldSessionCleanerDone chan bool
 }
 
 type AccessToken struct {
@@ -48,10 +52,9 @@ func (p *OAuthProvider) Initialize() error {
 			return err
 		}
 		p.DSSProvider = provider
-		break
 	case "memcache":
 		p.Logger.Info("Using MemcacheDSSProvider")
-		provider, err := NewRedisDSSProvider(0)
+		provider, err := NewMemcacheDSSProvider(0)
 		if err != nil {
 			p.Logger.Error("Failed to create RedisDSSProvider", zap.Error(err))
 			return err
@@ -62,7 +65,6 @@ func (p *OAuthProvider) Initialize() error {
 			return err
 		}
 		p.DSSProvider = provider
-		break
 	default:
 		p.Logger.Error("Invalid DSS provider type", zap.String("type", providerType))
 		return errors.New("invalid DSS provider type")
@@ -85,14 +87,35 @@ func (p *OAuthProvider) Initialize() error {
 		p.Clients[client.ClientId] = client
 	}
 
-	p.Logger.Debug("OAuthProvider initialized from clients.json")
-	p.Logger.Debug("Number of clients loaded: ", zap.Int("count", len(p.Clients)))
+	cleanupIntervalStr := os.Getenv("DSS_CLEANUP_INTERVAL_SECONDS")
+	cleanupIntervalSeconds := int64(5 * 60)
+	if cleanupIntervalStr != "" {
+		cleanupIntervalSeconds, err = strconv.ParseInt(cleanupIntervalStr, 10, 64)
+		if err != nil {
+			p.Logger.Error("Failed to parse DSS_CLEANUP_INTERVAL_SECONDS, Using 5 minutes as fallback", zap.Error(err))
+		}
+	}
 
-	//for _, client := range clients {
-	//	serialazedClient, _ := json.Marshal(client)
-	//	p.RedisClient.Set(p.Context, "oauth2"+client.ClientId, serialazedClient, 0)
-	//	p.Logger.Debug("Client added to Redis", zap.String("clientId", client.ClientId))
-	//}
+	p.Logger.Info(fmt.Sprintf("Scheduled cleanup interval: %d seconds", cleanupIntervalSeconds))
+	p.Logger.Info("OAuthProvider initialized from clients.json")
+	p.Logger.Info("Number of clients loaded: ", zap.Int("count", len(p.Clients)))
+
+	p.ExpiredTokenTicker = time.NewTicker(time.Duration(cleanupIntervalSeconds) * time.Second)
+	p.OldSessionCleanerDone = make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case <-p.OldSessionCleanerDone:
+				p.Logger.Info("Stopping expired token ticker")
+				return
+			case <-p.ExpiredTokenTicker.C:
+				p.Logger.Info("Cleaning old tokens")
+				p.DSSProvider.CleanOldTokens(p.Clients)
+				p.Logger.Info("Finished cleaning old tokens")
+			}
+		}
+	}()
 
 	return nil
 }
@@ -106,7 +129,6 @@ func (p *OAuthProvider) Close() {
 	p.Logger.Debug("Closing OAuthProvider")
 	if p.IsPrimaryNode {
 		p.Logger.Debug("We're the primary node, flushing Redis")
-		//p.RedisClient.FlushDB(p.Context)
 	}
 	err := p.DSSProvider.DetachFromStore()
 	if err != nil {
