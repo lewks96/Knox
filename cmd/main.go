@@ -1,8 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -20,25 +20,25 @@ import (
 
 func main() {
 	Logger, _ := zap.NewProduction()
-    defer Logger.Sync()
-    Logger.Info("KnoxAM server starting")
+	defer Logger.Sync()
+	Logger.Info("KnoxAM server starting")
 
 	err := godotenv.Load()
 	if err != nil {
 		panic(err)
 	}
-    Logger.Info("Loaded .env file")
+	Logger.Info("Loaded .env file")
 
 	app := &core.AppState{}
 	app.Initialize()
 	defer app.Close()
 
-    Logger.Info("Application initialized")
+	Logger.Info("Application initialized")
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
-	    Logger, _ := zap.NewProduction()
+		Logger, _ := zap.NewProduction()
 		<-c
 		Logger.Info("Received interrupt signal, closing application")
 		app.Close()
@@ -121,8 +121,8 @@ func main() {
 			respJson := map[string]string{"error": "invalid access token"}
 			return c.JSON(http.StatusUnauthorized, respJson)
 		}
-        respJson := map[string]string{"error": fmt.Sprintf("deleted %d sessions", count)}
-        return c.JSON(http.StatusOK, respJson)
+		respJson := map[string]string{"error": fmt.Sprintf("deleted %d sessions", count)}
+		return c.JSON(http.StatusOK, respJson)
 	})
 
 	e.DELETE("/oauth/revoke", func(c echo.Context) error {

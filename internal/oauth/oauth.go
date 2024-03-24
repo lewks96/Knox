@@ -1,14 +1,11 @@
 package oauth
 
 import (
-	//"crypto/tls"
 	"errors"
 	"github.com/lewks96/knox-am/internal/oauth/internal"
 	"github.com/lewks96/knox-am/internal/util"
-	//"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"os"
-	//"strconv"
 	"strings"
 	"time"
 )
@@ -36,7 +33,9 @@ func (p *OAuthProvider) Initialize() error {
 	p.Logger, _ = zap.NewProduction()
 	p.Logger.Debug("We're the primary node, flushing and setting global-running to true")
 	providerType := os.Getenv("DSS_PROVIDER")
-	if providerType == "redis" {
+
+	switch providerType {
+	case "redis":
 		p.Logger.Info("Using RedisDSSProvider")
 		provider, err := NewRedisDSSProvider(0)
 		if err != nil {
@@ -49,7 +48,8 @@ func (p *OAuthProvider) Initialize() error {
 			return err
 		}
 		p.DSSProvider = provider
-	} else if providerType == "memcache" {
+		break
+	case "memcache":
 		p.Logger.Info("Using MemcacheDSSProvider")
 		provider, err := NewRedisDSSProvider(0)
 		if err != nil {
@@ -62,7 +62,8 @@ func (p *OAuthProvider) Initialize() error {
 			return err
 		}
 		p.DSSProvider = provider
-	} else {
+		break
+	default:
 		p.Logger.Error("Invalid DSS provider type", zap.String("type", providerType))
 		return errors.New("invalid DSS provider type")
 	}

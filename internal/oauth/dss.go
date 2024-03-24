@@ -5,14 +5,12 @@ import (
 )
 
 type SessionProvider interface {
-    AttachToStore() error
-    DetachFromStore() error
+	AttachToStore() error
+	DetachFromStore() error
 	GetSession(accessToken string) (oauth.StoredSession, error)
 	SaveSession(session oauth.StoredSession) error
 	DeleteSession(accessToken string) error
-    Flush() (int, error)
-    Ping() error
-    CleanOldTokens()
+	Flush() (int, error)
+	Ping() error
+	CleanOldTokens()
 }
-
-
