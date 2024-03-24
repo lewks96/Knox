@@ -1,16 +1,15 @@
 package oauth
 
 import (
-	"crypto/tls"
-	"context"
-	"encoding/json"
+	"fmt"
+	//"crypto/tls"
 	"errors"
-	"os"
-	"strconv"
 	"github.com/lewks96/knox-am/internal/oauth/internal"
 	"github.com/lewks96/knox-am/internal/util"
-	"github.com/redis/go-redis/v9"
+	//"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"os"
+	//"strconv"
 	"strings"
 	"time"
 )
@@ -20,12 +19,13 @@ import (
  * @description Contains configuration and methods to provide OAuth services
  */
 type OAuthProvider struct {
-	Clients            map[string]oauth.OAuthClientConfiguration
-	RedisClient        *redis.Client
-	Context            context.Context
-	Logger             *zap.Logger
-	IsPrimaryNode      bool
-	RedisSubmitChannel chan oauth.StoredSession
+	Clients map[string]oauth.OAuthClientConfiguration
+	//RedisClient        *redis.Client
+	//Context            context.Context
+	Logger        *zap.Logger
+	IsPrimaryNode bool
+	//RedisSubmitChannel chan oauth.StoredSession
+	DSSProvider SessionProvider
 }
 
 type AccessToken struct {
@@ -36,103 +36,73 @@ type AccessToken struct {
 	Scope        string `json:"scope"`
 }
 
-func (p *OAuthProvider) pullClientsFromRedis() error {
-	clients := p.RedisClient.Keys(p.Context, "oauth2*")
-	p.Logger.Debug("Number of clients loaded from Redis", zap.Int("count", len(clients.Val())))
-	p.Clients = make(map[string]oauth.OAuthClientConfiguration)
-	for _, client := range clients.Val() {
-		serialazedClient := p.RedisClient.Get(p.Context, client)
-		var clientConfig oauth.OAuthClientConfiguration
-		err := json.Unmarshal([]byte(serialazedClient.Val()), &clientConfig)
-		if err != nil {
-			p.Logger.Error("Failed to unmarshal client from Redis", zap.Error(err))
-			return err
-		}
-		p.Clients[clientConfig.ClientId] = clientConfig
-		p.Logger.Debug("Client added to OAuthProvider", zap.String("clientId", clientConfig.ClientId))
-	}
-	return nil
-}
+//func (p *OAuthProvider) pullClientsFromRedis() error {
+//	clients := p.RedisClient.Keys(p.Context, "oauth2*")
+//	p.Logger.Debug("Number of clients loaded from Redis", zap.Int("count", len(clients.Val())))
+//	p.Clients = make(map[string]oauth.OAuthClientConfiguration)
+//	for _, client := range clients.Val() {
+//		serialazedClient := p.RedisClient.Get(p.Context, client)
+//		var clientConfig oauth.OAuthClientConfiguration
+//		err := json.Unmarshal([]byte(serialazedClient.Val()), &clientConfig)
+//		if err != nil {
+//			p.Logger.Error("Failed to unmarshal client from Redis", zap.Error(err))
+//			return err
+//		}
+//		p.Clients[clientConfig.ClientId] = clientConfig
+//		p.Logger.Debug("Client added to OAuthProvider", zap.String("clientId", clientConfig.ClientId))
+//	}
+//	return nil
+//}
 
 func (p *OAuthProvider) Initialize() error {
-	redisHost := os.Getenv("REDIS_HOST")
-	redisPort := os.Getenv("REDIS_PORT")
-	redisPassword := os.Getenv("REDIS_PASSWORD")
-	redisDB := os.Getenv("REDIS_DB")
-    redisUseTLS := os.Getenv("REDIS_USE_TLS")
-
-	redisDBInt, err := strconv.Atoi(redisDB)
-	if err != nil {
-		redisDBInt = 0
-	}
-
-    tslConfig := tls.Config{
-        MinVersion: tls.VersionTLS12,
-    }
-
-    opt := redis.Options{
-		Addr:     redisHost + ":" + redisPort,
-		Password: redisPassword,
-		DB:       redisDBInt,
-	};
-    if redisUseTLS == "true" {
-        opt.TLSConfig = &tslConfig
-    }
-
 	p.Logger, _ = zap.NewProduction()
-	p.Context = context.Background()
-	p.RedisClient = redis.NewClient(&opt)
+	p.Logger.Debug("We're the primary node, flushing and setting global-running to true")
+	providerType := os.Getenv("DSS_PROVIDER")
+	if providerType == "redis" {
+		p.Logger.Debug("Using RedisDSSProvider")
+		provider, err := NewRedisDSSProvider(0)
+		if err != nil {
+			p.Logger.Error("Failed to create RedisDSSProvider", zap.Error(err))
+			return err
+		}
+        err = provider.AttachToStore()
+        if err != nil {
+            p.Logger.Error("Failed to attach to Redis store", zap.Error(err))
+            return err
+        }
+		p.DSSProvider = provider
+	} else {
+		p.Logger.Error("Invalid DSS provider type", zap.String("type", providerType))
+		return errors.New("invalid DSS provider type")
+	}
+    
+    err := p.DSSProvider.Ping()
+    if err != nil {
+        p.Logger.Error("Failed to ping DSS provider", zap.Error(err))
+        return err
+    }
 
-	err = p.RedisClient.Ping(p.Context).Err()
+	//p.RedisClient.Set(p.Context, "global-running", "true", 0)
+
+	clients, err := oauth.LoadClientsFromConfigFile()
 	if err != nil {
-		p.Logger.Error("Failed to connect to Redis", zap.Error(err))
+		p.Logger.Error("Failed to load clients from config file", zap.Error(err))
+		p.Close()
 		return err
 	}
-
-	p.RedisSubmitChannel = make(chan oauth.StoredSession)
-	go func() {
-		for {
-			accessSession := <-p.RedisSubmitChannel
-			serialazedSession, _ := json.Marshal(accessSession)
-			p.RedisClient.Set(p.Context, "session-"+accessSession.AccessToken, serialazedSession, 0)
-		}
-	}()
-
-	// this is probably really bad but all good for now
-	isRunning := p.RedisClient.Get(p.Context, "global-running")
-	if isRunning.Val() == "true" {
-		p.Logger.Debug("Another node is running, we're not the primary node")
-		p.IsPrimaryNode = false
-		err := p.pullClientsFromRedis()
-		if err != nil {
-			return err
-		}
-	} else {
-		p.Logger.Debug("We're the primary node, flushing and setting global-running to true")
-		p.RedisClient.FlushDB(p.Context)
-		p.RedisClient.Set(p.Context, "global-running", "true", 0)
-		p.IsPrimaryNode = true
-
-		clients, err := oauth.LoadClientsFromConfigFile()
-		if err != nil {
-			p.Logger.Error("Failed to load clients from config file", zap.Error(err))
-			p.Close()
-			return err
-		}
-		p.Clients = make(map[string]oauth.OAuthClientConfiguration)
-		for _, client := range clients {
-			p.Clients[client.ClientId] = client
-		}
-
-		p.Logger.Debug("OAuthProvider initialized from clients.json")
-		p.Logger.Debug("Number of clients loaded: ", zap.Int("count", len(p.Clients)))
-
-		for _, client := range clients {
-			serialazedClient, _ := json.Marshal(client)
-			p.RedisClient.Set(p.Context, "oauth2"+client.ClientId, serialazedClient, 0)
-			p.Logger.Debug("Client added to Redis", zap.String("clientId", client.ClientId))
-		}
+	p.Clients = make(map[string]oauth.OAuthClientConfiguration)
+	for _, client := range clients {
+		p.Clients[client.ClientId] = client
 	}
+
+	p.Logger.Debug("OAuthProvider initialized from clients.json")
+	p.Logger.Debug("Number of clients loaded: ", zap.Int("count", len(p.Clients)))
+
+	//for _, client := range clients {
+	//	serialazedClient, _ := json.Marshal(client)
+	//	p.RedisClient.Set(p.Context, "oauth2"+client.ClientId, serialazedClient, 0)
+	//	p.Logger.Debug("Client added to Redis", zap.String("clientId", client.ClientId))
+	//}
 
 	return nil
 }
@@ -143,7 +113,10 @@ func (p *OAuthProvider) Close() {
 		p.Logger.Debug("We're the primary node, flushing Redis")
 		//p.RedisClient.FlushDB(p.Context)
 	}
-	p.RedisClient.Close()
+    err := p.DSSProvider.DetachFromStore() 
+    if err != nil {
+        p.Logger.Error("Failed to detach from DSS provider", zap.Error(err))
+    }
 }
 
 func (p *OAuthProvider) AuthenticateClient(client oauth.OAuthClientConfiguration, clientSecret string) bool {
@@ -202,7 +175,7 @@ func (p *OAuthProvider) generateSession(client oauth.OAuthClientConfiguration, s
 
 	accessToken := p.GenerateOpaqueToken()
 	refreshToken := p.GenerateOpaqueToken()
-	accessSession := oauth.StoredSession {
+	accessSession := oauth.StoredSession{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ClientId:     client.ClientId,
@@ -226,33 +199,39 @@ type TokenInfo struct {
 }
 
 func (p *OAuthProvider) GetTokenInfo(accessToken string) (TokenInfo, error) {
-	session := p.RedisClient.Get(p.Context, "session-"+accessToken)
-	if session.Val() == "" {
-		p.Logger.Debug("Session does not exist", zap.String("accessToken", accessToken))
-		return TokenInfo{}, errors.New("invalid access token")
-	}
+	//session := p.RedisClient.Get(p.Context, "session-"+accessToken)
+    session, err := p.DSSProvider.GetSession(fmt.Sprintf("session-%s", accessToken))
+    if err != nil {
+        p.Logger.Error("Failed to get session from DSS provider", zap.Error(err))
+        return TokenInfo{}, err
+    }
 
-	var accessSession oauth.StoredSession
-	err := json.Unmarshal([]byte(session.Val()), &accessSession)
-	if err != nil {
-		p.Logger.Error("Failed to unmarshal access session", zap.Error(err))
-		return TokenInfo{}, err
-	}
+	//if session.Val() == "" {
+	//	p.Logger.Debug("Session does not exist", zap.String("accessToken", accessToken))
+	//	return TokenInfo{}, errors.New("invalid access token")
+	//}
 
-	client, ok := p.Clients[accessSession.ClientId]
+//	var accessSession oauth.StoredSession
+//	err := json.Unmarshal([]byte(session.Val()), &accessSession)
+//	if err != nil {
+//		p.Logger.Error("Failed to unmarshal access session", zap.Error(err))
+//		return TokenInfo{}, err
+//	}
+
+	client, ok := p.Clients[session.ClientId]
 	if !ok {
-		p.Logger.Debug("Client does not exist", zap.String("clientId", accessSession.ClientId))
+		p.Logger.Debug("Client does not exist", zap.String("clientId", session.ClientId))
 		return TokenInfo{}, errors.New("client does not exist")
 	}
 
 	return TokenInfo{
-		AccessToken:  accessSession.AccessToken,
+		AccessToken:  session.AccessToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    client.AccessTokenExpiryTimeSeconds,
-		RefreshToken: accessSession.RefreshToken,
-		Scope:        accessSession.Scopes,
-		IssuedAt:     accessSession.IssuedAt,
-		ClientId:     accessSession.ClientId,
+		RefreshToken: session.RefreshToken,
+		Scope:        session.Scopes,
+		IssuedAt:     session.IssuedAt,
+		ClientId:     session.ClientId,
 	}, nil
 }
 
@@ -274,9 +253,7 @@ func (p *OAuthProvider) AuthorizeForGrantClientCredentials(clientId string, clie
 	}
 
 	accessSession := p.generateSession(client, scopes)
-	go func() {
-		p.RedisSubmitChannel <- accessSession
-	}()
+    p.DSSProvider.SaveSession(accessSession)
 
 	return &AccessToken{
 		AccessToken:  accessSession.AccessToken,
