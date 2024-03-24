@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"strconv"
-	//"github.com/google/uuid"
 	"github.com/lewks96/knox-am/internal/oauth/internal"
 	"github.com/lewks96/knox-am/internal/util"
 	"github.com/redis/go-redis/v9"
@@ -26,7 +25,7 @@ type OAuthProvider struct {
 	Context            context.Context
 	Logger             *zap.Logger
 	IsPrimaryNode      bool
-	RedisSubmitChannel chan redisAccessSession
+	RedisSubmitChannel chan oauth.StoredSession
 }
 
 type AccessToken struct {
@@ -35,14 +34,6 @@ type AccessToken struct {
 	ExpiresIn    int    `json:"expires_in"`
 	RefreshToken string `json:"refresh_token"`
 	Scope        string `json:"scope"`
-}
-
-type redisAccessSession struct {
-	AccessToken  string `json:"accessToken"`
-	RefreshToken string `json:"refreshToken"`
-	ClientId     string `json:"clientId"`
-	Scopes       string `json:"scopes"`
-	IssuedAt     int64  `json:"issuedAt"`
 }
 
 func (p *OAuthProvider) pullClientsFromRedis() error {
@@ -98,7 +89,7 @@ func (p *OAuthProvider) Initialize() error {
 		return err
 	}
 
-	p.RedisSubmitChannel = make(chan redisAccessSession)
+	p.RedisSubmitChannel = make(chan oauth.StoredSession)
 	go func() {
 		for {
 			accessSession := <-p.RedisSubmitChannel
@@ -205,13 +196,13 @@ func (p *OAuthProvider) GenerateOpaqueToken() string {
 	return util.GenerateRandomAlphaNumericString(64)
 }
 
-func (p *OAuthProvider) generateSession(client oauth.OAuthClientConfiguration, scopes string) redisAccessSession {
+func (p *OAuthProvider) generateSession(client oauth.OAuthClientConfiguration, scopes string) oauth.StoredSession {
 	// generate timestap
 	ts := time.Now().Unix()
 
 	accessToken := p.GenerateOpaqueToken()
 	refreshToken := p.GenerateOpaqueToken()
-	accessSession := redisAccessSession{
+	accessSession := oauth.StoredSession {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ClientId:     client.ClientId,
@@ -241,7 +232,7 @@ func (p *OAuthProvider) GetTokenInfo(accessToken string) (TokenInfo, error) {
 		return TokenInfo{}, errors.New("invalid access token")
 	}
 
-	var accessSession redisAccessSession
+	var accessSession oauth.StoredSession
 	err := json.Unmarshal([]byte(session.Val()), &accessSession)
 	if err != nil {
 		p.Logger.Error("Failed to unmarshal access session", zap.Error(err))
