@@ -18,32 +18,35 @@ import (
 )
 
 func main() {
+	Logger, _ := zap.NewProduction()
+    defer Logger.Sync()
+    Logger.Info("KnoxAM server starting")
+
 	err := godotenv.Load()
 	if err != nil {
 		panic(err)
 	}
+    Logger.Info("Loaded .env file")
 
 	app := &core.AppState{}
 	app.Initialize()
 	defer app.Close()
 
+    Logger.Info("Application initialized")
+
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
+	    Logger, _ := zap.NewProduction()
 		<-c
+		Logger.Info("Received interrupt signal, closing application")
 		app.Close()
 		os.Exit(1)
 	}()
 
-	logger, er := zap.NewProduction()
-	if er != nil {
-		panic(er)
-	}
-	defer logger.Sync()
-
 	e := echo.New()
 	e.Use(middleware.Recover())
-	e.Use(util.ZapRequestLogger(logger))
+	e.Use(util.ZapRequestLogger(Logger))
 
 	e.POST("/oauth/token", func(c echo.Context) error {
 		// read body to string
@@ -105,19 +108,20 @@ func main() {
 
 		tokenInfo, err := app.OAuthProvider.GetTokenInfo(accessToken)
 		if err != nil {
-			respJson := map[string]string{"error": err.Error()}
+			respJson := map[string]string{"error": "invalid access token"}
 			return c.JSON(http.StatusUnauthorized, respJson)
 		}
 		return c.JSON(http.StatusOK, tokenInfo)
 	})
+
 	hostname := os.Getenv("HOSTNAME")
 	port := os.Getenv("PORT")
 	if hostname == "" {
-		logger.Info("HOSTNAME environment variable not set, defaulting to localhost")
+		Logger.Info("HOSTNAME environment variable not set, defaulting to localhost")
 		hostname = "localhost"
 	}
 	if port == "" {
-		logger.Info("PORT environment variable not set, defaulting to 9000")
+		Logger.Info("PORT environment variable not set, defaulting to 9000")
 		port = "9000"
 	}
 	e.Logger.Fatal(e.Start(hostname + ":" + port))

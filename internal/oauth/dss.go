@@ -115,6 +115,7 @@ func (r *RedisDSSProvider) AttachToStore() error {
         for {
             select {
             case <-r.Done:
+                r.Logger.Info("Stopping ping ticker")
                 return
             case <-r.PingTicker.C:
                 err := r.Ping()
@@ -129,6 +130,8 @@ func (r *RedisDSSProvider) AttachToStore() error {
 }
 
 func (r *RedisDSSProvider) DetachFromStore() error {
+    r.Done <- true
+    r.Logger.Info("Detaching from Redis store")
     res := r.RedisClient.Get(r.Context, fmt.Sprintf("node-attached-%d", r.NodeId))
     if res.Val() == "false" {
         return errors.New("node with provided ID is already detached from Redis Store")
@@ -145,6 +148,10 @@ func (r *RedisDSSProvider) DetachFromStore() error {
 
 func (r *RedisDSSProvider) GetSession(accessToken string) (oauth.StoredSession, error) {
 	session := r.RedisClient.Get(r.Context, accessToken)
+    if session.Err() != nil {
+        return oauth.StoredSession{}, errors.New("session does not exist in store")
+    }
+
 	var storedSession oauth.StoredSession
     err := json.Unmarshal([]byte(session.Val()), &storedSession)
 	if err != nil {

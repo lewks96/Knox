@@ -82,8 +82,6 @@ func (p *OAuthProvider) Initialize() error {
         return err
     }
 
-	//p.RedisClient.Set(p.Context, "global-running", "true", 0)
-
 	clients, err := oauth.LoadClientsFromConfigFile()
 	if err != nil {
 		p.Logger.Error("Failed to load clients from config file", zap.Error(err))
