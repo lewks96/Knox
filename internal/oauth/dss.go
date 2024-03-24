@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-    "time"
+	"time"
 	"github.com/lewks96/knox-am/internal/oauth/internal"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -20,8 +20,9 @@ type SessionProvider interface {
 	GetSession(accessToken string) (oauth.StoredSession, error)
 	SaveSession(session oauth.StoredSession) error
 	DeleteSession(accessToken string) error
-    Flush() error
+    Flush() (int, error)
     Ping() error
+    CleanOldTokens()
 }
 
 type RedisDSSProvider struct {
@@ -32,14 +33,15 @@ type RedisDSSProvider struct {
     NodeId      int
     Done        chan bool
     PingTicker  *time.Ticker
+    ExpiredTokenTicker  *time.Ticker
 }
 
 func NewRedisDSSProvider(nodeId int) (*RedisDSSProvider, error) {
-	redisHost := os.Getenv("REDIS_HOST")
-	redisPort := os.Getenv("REDIS_PORT")
-	redisPassword := os.Getenv("REDIS_PASSWORD")
-	redisDB := os.Getenv("REDIS_DB")
-    redisUseTLS := os.Getenv("REDIS_USE_TLS")
+	redisHost := os.Getenv("DSS_REDIS_HOST")
+	redisPort := os.Getenv("DSS_REDIS_PORT")
+	redisPassword := os.Getenv("DSS_REDIS_PASSWORD")
+	redisDB := os.Getenv("DSS_REDIS_DB")
+    redisUseTLS := os.Getenv("DSS_REDIS_USE_TLS")
 
 	redisDBInt, err := strconv.Atoi(redisDB)
 	if err != nil {
@@ -70,7 +72,6 @@ func NewRedisDSSProvider(nodeId int) (*RedisDSSProvider, error) {
 	}
 
     Logger.Info("Connected to Redis")
-
     provider := &RedisDSSProvider{
         RedisClient: RedisClient,
         Context: Context,
@@ -79,6 +80,7 @@ func NewRedisDSSProvider(nodeId int) (*RedisDSSProvider, error) {
         NodeId: nodeId,
         Done: make(chan bool),
         PingTicker: time.NewTicker(10 * time.Second),
+        ExpiredTokenTicker: time.NewTicker(30 * time.Second),
     }
     return provider, nil
 }
@@ -126,6 +128,19 @@ func (r *RedisDSSProvider) AttachToStore() error {
             }
         }
     }()
+
+    go func() {
+        for {
+            select {
+            case <-r.Done:
+                r.Logger.Info("Stopping expired token ticker")
+                return
+            case <-r.ExpiredTokenTicker.C:
+                r.CleanOldTokens()
+            }
+        }
+    }()
+
     return nil
 }
 
@@ -147,17 +162,22 @@ func (r *RedisDSSProvider) DetachFromStore() error {
 }
 
 func (r *RedisDSSProvider) GetSession(accessToken string) (oauth.StoredSession, error) {
-	session := r.RedisClient.Get(r.Context, accessToken)
-    if session.Err() != nil {
+    sessionKey := "session-" + accessToken
+    r.Logger.Info("Getting session", zap.String("sessionKey", sessionKey))
+    res := r.RedisClient.Get(r.Context, sessionKey)
+    if res.Val() == "" {
+        r.Logger.Error("Failed to get session", zap.String("accessToken", accessToken))
         return oauth.StoredSession{}, errors.New("session does not exist in store")
     }
 
-	var storedSession oauth.StoredSession
-    err := json.Unmarshal([]byte(session.Val()), &storedSession)
-	if err != nil {
-		return oauth.StoredSession{}, err
-	}
-	return storedSession, nil
+    var storedSession oauth.StoredSession
+    err := json.Unmarshal([]byte(res.Val()), &storedSession)
+    if err != nil {
+        r.Logger.Error("Failed to unmarshal session", zap.Error(err))
+        return oauth.StoredSession{}, err
+    }
+
+    return storedSession, nil
 }
 
 func (r *RedisDSSProvider) SaveSession(session oauth.StoredSession) error {
@@ -166,12 +186,15 @@ func (r *RedisDSSProvider) SaveSession(session oauth.StoredSession) error {
 }
 
 func (r *RedisDSSProvider) DeleteSession(accessToken string) error {
-    exists := r.RedisClient.Get(r.Context, accessToken)
-    if exists.Err() != nil {
+    r.Logger.Debug("Deleting session", zap.String("accessToken", accessToken))
+    _, e := r.GetSession(accessToken)
+    if e != nil {
+        r.Logger.Error("Failed to get session", zap.Error(e))
         return errors.New("session does not exist in store")
     }
 
-    err := r.RedisClient.Del(r.Context, accessToken)
+    sessionKey := "session-" + accessToken
+    err := r.RedisClient.Del(r.Context, sessionKey)
     if err.Err() != nil {
         r.Logger.Error("Failed to delete session", zap.Error(err.Err()))
         return err.Err()
@@ -179,16 +202,26 @@ func (r *RedisDSSProvider) DeleteSession(accessToken string) error {
 	return nil
 }
 
-func (r *RedisDSSProvider) Flush() error {
+func (r *RedisDSSProvider) Flush() (int, error) {
     if r.NodeId != 0 {
-        return errors.New("only the master node can flush the database")
+        return 0, errors.New("only the master node can flush the database")
     }
-    err := r.RedisClient.Del(r.Context, "session-*") 
-    if err.Err() != nil {
-        r.Logger.Error("Failed to flush the database", zap.Error(err.Err()))
-        return err.Err()
+     
+    keys, err := r.RedisClient.Keys(r.Context, "session-*").Result()
+    if err != nil {
+        r.Logger.Error("Failed to get keys from Redis", zap.Error(err))
+        return 0, err
     }
-    return nil
+
+    // delete all keys in the database starting with "session-"
+    for _, key := range keys {
+        err := r.RedisClient.Del(r.Context, key)
+        if err.Err() != nil {
+            r.Logger.Error("Failed to delete key from Redis", zap.Error(err.Err()))
+            return 0, err.Err()
+        }
+    }
+    return len(keys), nil
 }
 
 func (r *RedisDSSProvider) Ping() error {
@@ -199,3 +232,15 @@ func (r *RedisDSSProvider) Ping() error {
     }
     return nil
 }
+
+func (r *RedisDSSProvider) CleanOldTokens() {
+    // rely on redis expiry to clean up old tokens 
+    keys, err := r.RedisClient.Keys(r.Context, "session-*").Result()
+    if err != nil {
+        r.Logger.Error("Failed to get keys from Redis", zap.Error(err))
+        return
+    }
+    r.Logger.Debug("Cleaning old expired tokens", zap.Int("count", len(keys)))
+}
+
+

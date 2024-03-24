@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"encoding/json"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -112,6 +113,16 @@ func main() {
 			return c.JSON(http.StatusUnauthorized, respJson)
 		}
 		return c.JSON(http.StatusOK, tokenInfo)
+	})
+
+	e.DELETE("/sessions/revoke", func(c echo.Context) error {
+		count, err := app.OAuthProvider.RevokeAllSessions()
+		if err != nil {
+			respJson := map[string]string{"error": "invalid access token"}
+			return c.JSON(http.StatusUnauthorized, respJson)
+		}
+        respJson := map[string]string{"error": fmt.Sprintf("deleted %d sessions", count)}
+        return c.JSON(http.StatusOK, respJson)
 	})
 
 	e.DELETE("/oauth/revoke", func(c echo.Context) error {

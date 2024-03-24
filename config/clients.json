@@ -7,7 +7,7 @@
      ],
      "issueRefreshToken": true,
      "tokenType":"opaque",
-     "accessTokenExpiryTimeSeconds": 3600,
+     "accessTokenExpiryTimeSeconds": 5,
      "refreshTokenExpiryTimeSeconds": 86400,
      "redirectUris": [],
      "scopes": ["", "testscope"]

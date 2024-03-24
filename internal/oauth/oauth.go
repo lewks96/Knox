@@ -1,7 +1,6 @@
 package oauth
 
 import (
-	"fmt"
 	//"crypto/tls"
 	"errors"
 	"github.com/lewks96/knox-am/internal/oauth/internal"
@@ -105,6 +104,11 @@ func (p *OAuthProvider) Initialize() error {
 	return nil
 }
 
+// Dev function to revoke all sessions
+func (p *OAuthProvider) RevokeAllSessions() (int, error) {
+    return p.DSSProvider.Flush();
+}
+
 func (p *OAuthProvider) Close() {
 	p.Logger.Debug("Closing OAuthProvider")
 	if p.IsPrimaryNode {
@@ -199,7 +203,7 @@ func (p *OAuthProvider) DeleteSession(accessToken string) error {
 }
 
 func (p *OAuthProvider) GetTokenInfo(accessToken string) (TokenInfo, error) {
-    session, err := p.DSSProvider.GetSession(fmt.Sprintf("session-%s", accessToken))
+    session, err := p.DSSProvider.GetSession(accessToken)
     if err != nil {
         p.Logger.Error("Failed to get session from DSS provider", zap.Error(err))
         return TokenInfo{}, err
@@ -211,10 +215,18 @@ func (p *OAuthProvider) GetTokenInfo(accessToken string) (TokenInfo, error) {
 		return TokenInfo{}, errors.New("client does not exist")
 	}
 
+    expiration := session.IssuedAt + int64(client.AccessTokenExpiryTimeSeconds)
+    exp := int(expiration - time.Now().Unix())
+    if exp <= 0 {   
+        p.Logger.Info("Access token has expired", zap.String("accessToken", accessToken))
+        p.DeleteSession(accessToken)
+        return TokenInfo{}, errors.New("access token has expired or been revoked")
+    }
+
 	return TokenInfo{
 		AccessToken:  session.AccessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    client.AccessTokenExpiryTimeSeconds,
+		ExpiresIn:    int(expiration - time.Now().Unix()),
 		RefreshToken: session.RefreshToken,
 		Scope:        session.Scopes,
 		IssuedAt:     session.IssuedAt,
