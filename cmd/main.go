@@ -18,12 +18,50 @@ import (
 	"strings"
 )
 
+func createDefaultEnvFile() {
+    envFile := `
+    # Server Config
+    HOSTNAME=localhost
+    PORT=9000
+    
+    # Database Config
+    DB_HOST=127.0.0.1
+    DB_PORT=3306
+    DB_USER=
+    DB_PASSWORD=
+    
+    #DSS_PROVIDER=redis
+    DSS_PROVIDER=memcache
+    DSS_CLEANUP_INTERVAL_SECONDS=60
+    
+    # Memcache Config
+    DSS_MEMCACHE_PREALLOCATE=1000
+    
+    # Redis Config
+    DSS_REDIS_HOST=127.0.0.1
+    DSS_REDIS_PORT=6379
+    DSS_REDIS_PASSWORD=
+    DSS_REDIS_DB=0
+    DSS_REDIS_USE_TLS=false
+    `
+    err := os.WriteFile(".env", []byte(envFile), 0644)
+    if err != nil {
+        panic(err)
+    }
+}
+
 func main() {
 	Logger, _ := zap.NewProduction()
 	defer Logger.Sync()
 	Logger.Info("KnoxAM server starting")
 
-	err := godotenv.Load()
+    _, err := os.Stat(".env")
+    if os.IsNotExist(err) {
+        Logger.Info("No .env file found, creating default .env file")
+        createDefaultEnvFile()
+    }
+
+	err = godotenv.Load()
 	if err != nil {
 		panic(err)
 	}
