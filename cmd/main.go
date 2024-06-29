@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/joho/godotenv"
@@ -19,7 +20,7 @@ import (
 )
 
 func createDefaultEnvFile() {
-    envFile := `
+	envFile := `
     # Server Config
     HOSTNAME=localhost
     PORT=9000
@@ -44,10 +45,10 @@ func createDefaultEnvFile() {
     DSS_REDIS_DB=0
     DSS_REDIS_USE_TLS=false
     `
-    err := os.WriteFile(".env", []byte(envFile), 0644)
-    if err != nil {
-        panic(err)
-    }
+	err := os.WriteFile(".env", []byte(envFile), 0644)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func main() {
@@ -55,11 +56,11 @@ func main() {
 	defer Logger.Sync()
 	Logger.Info("KnoxAM server starting")
 
-    _, err := os.Stat(".env")
-    if os.IsNotExist(err) {
-        Logger.Info("No .env file found, creating default .env file")
-        createDefaultEnvFile()
-    }
+	_, err := os.Stat(".env")
+	if os.IsNotExist(err) {
+		Logger.Info("No .env file found, creating default .env file")
+		createDefaultEnvFile()
+	}
 
 	err = godotenv.Load()
 	if err != nil {
@@ -101,24 +102,43 @@ func main() {
 			data[pair[0]], _ = url.QueryUnescape(pair[1])
 		}
 
-		clientId := data["client_id"]
-		clientSecret := data["client_secret"]
 		grantType := data["grant_type"]
 		scope := data["scope"]
 		//redirectUri := data["redirect_uri"]
 
-		if clientId == "" {
-			errorResponse := map[string]string{"error": "client_id is required"}
-			return c.JSON(http.StatusBadRequest, errorResponse)
+		authHeader := c.Request().Header.Get("Authorization")
+		clientId := ""
+		clientSecret := ""
+
+		if authHeader != "" {
+			authHeader = strings.TrimPrefix(authHeader, "Basic ")
+			res, err := base64.StdEncoding.DecodeString(authHeader)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+			}
+			decodedString := string(res)
+			slice := strings.Split(decodedString, ":")
+			clientId = slice[0]
+			clientSecret = slice[1]
+		} else {
+			clientId = data["client_id"]
+			clientSecret = data["client_secret"]
+			if clientId == "" {
+				errorResponse := map[string]string{"error": "client_id is required"}
+				return c.JSON(http.StatusBadRequest, errorResponse)
+			}
+			if clientSecret == "" {
+				errorResponse := map[string]string{"error": "client_secret is required"}
+				return c.JSON(http.StatusBadRequest, errorResponse)
+			}
+			if grantType == "" {
+				errorResponse := map[string]string{"error": "grant_type is required"}
+				return c.JSON(http.StatusBadRequest, errorResponse)
+			}
 		}
-		if clientSecret == "" {
-			errorResponse := map[string]string{"error": "client_secret is required"}
-			return c.JSON(http.StatusBadRequest, errorResponse)
-		}
-		if grantType == "" {
-			errorResponse := map[string]string{"error": "grant_type is required"}
-			return c.JSON(http.StatusBadRequest, errorResponse)
-		}
+
+		Logger.Info("Client ID", zap.String("client_id", clientId))
+		Logger.Info("Client Secret", zap.String("client_secret", clientSecret))
 
 		switch grantType {
 		case "client_credentials":
